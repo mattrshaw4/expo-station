@@ -27,8 +27,18 @@ TICKET_TIME = Histogram(
     "kitchen_ticket_time_seconds",
     "Fired-to-served time per ticket",
     ["dish"],
-    buckets=(0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60),
+    # Top bucket must exceed the worst real ticket time, or p95 flatlines at the top bucket
+    # (it read exactly 60s while real tickets waited minutes on a backed-up rail).
+    buckets=(0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60, 120, 300, 600),
 )
+
+# Pre-create every label combination at 0. A counter series doesn't exist until first
+# incremented, so with no 86'd tickets yet the error-ratio query returned *nothing*
+# (shown as "No tickets") instead of 0%.
+for _dish in MENU:
+    for _outcome in ("served", "86d"):
+        TICKETS_COOKED.labels(_dish, _outcome)
+    TICKET_TIME.labels(_dish)
 
 running = True
 

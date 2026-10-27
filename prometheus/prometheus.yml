@@ -1,0 +1,41 @@
+# Prometheus: the expo station's eyes. Pulls (scrapes) metrics from everything every 15s.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: expo-station
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Prometheus watching itself
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Front of house
+  - job_name: order-api
+    static_configs:
+      - targets: ["order-api:8000"]
+        labels:
+          station: front-of-house
+
+  # The line
+  - job_name: line-worker
+    static_configs:
+      - targets: ["line-worker:9100"]
+        labels:
+          station: line
+
+  # Container CPU / memory / network for every container (Docker API, cAdvisor-compatible names)
+  - job_name: docker-stats
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["docker-stats:9417"]
+    metric_relabel_configs:
+      # Drop container_* series with no Compose service label (non-Compose containers).
+      # Scoped to container_* so the exporter's own health metrics are kept.
+      - source_labels: [__name__, container_label_com_docker_compose_service]
+        regex: "container_.*;"
+        action: drop

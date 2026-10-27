@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: expo-station
+    folder: Expo Station
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false     # dashboards live in git; export JSON if you edit in the UI
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

@@ -91,9 +91,88 @@ services:
     restart: unless-stopped
     develop: *kitchen-watch
 
+  # =====================================================================
+  # Phase 2: the expo station (metrics)
+  # =====================================================================
+
+  # ---------- Prometheus: scrapes and stores every metric ----------
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle          # lets you reload config with: curl -X POST localhost:9090/-/reload
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      order-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- docker-stats: CPU / memory / network for every container ----------
+  # Replaces cAdvisor. cAdvisor needs the containerd socket, which Docker Desktop doesn't
+  # expose to containers. This reads the Docker API instead (same data as `docker stats`)
+  # and keeps cAdvisor's metric names, so the dashboard queries didn't change.
+  docker-stats:
+    build: ./exporters/docker-stats
+    environment:
+      COMPOSE_PROJECT: expo-station     # only report this project's containers
+    volumes:
+      # SECURITY: docker.sock = root on the Docker host, even mounted :ro (ro blocks file
+      # writes, not API calls). Fine for a local lab; in shared environments put a
+      # read-only socket proxy in front of it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if b'docker_stats_exporter_up 1.0' in urllib.request.urlopen('http://localhost:9417/metrics', timeout=5).read() else 1)"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------- Grafana: the dashboard on the pass ----------
+  grafana:
+    image: grafana/grafana:13.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/expo-station.json
+    secrets: [grafana_admin_password]
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
 secrets:
   db_password:
     file: ./secrets/db_password.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
 
 volumes:
   db-data:
+  prometheus-data:
+  grafana-data:

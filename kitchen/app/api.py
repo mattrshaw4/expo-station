@@ -23,6 +23,8 @@ HTTP_LATENCY = Histogram(
     "expo_http_request_duration_seconds", "HTTP request latency", ["method", "route"]
 )
 TICKETS_FIRED = Counter("kitchen_tickets_fired_total", "Tickets fired to the rail", ["dish"])
+for _dish in MENU:
+    TICKETS_FIRED.labels(_dish)  # pre-create at 0 so per-dish panels show 0, not missing
 RAIL_DEPTH = Gauge("kitchen_rail_depth", "Tickets waiting on the rail (queue depth)")
 
 # --- Connections ---------------------------------------------------------------

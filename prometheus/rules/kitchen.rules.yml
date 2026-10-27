@@ -1,0 +1,35 @@
+# Recording rules: pre-computed queries the dashboard (and Phase 4 alerts) reuse.
+# Naming convention: level:metric:operations  (https://prometheus.io/docs/practices/rules/)
+groups:
+  - name: kitchen-golden-signals
+    interval: 15s
+    rules:
+      # Traffic: tickets fired per minute
+      - record: kitchen:tickets_fired:rate1m_per_min
+        expr: sum(rate(kitchen_tickets_fired_total[1m])) * 60
+
+      # Errors: share of finished tickets that got 86'd (0-1)
+      - record: kitchen:tickets_86d:ratio_rate5m
+        expr: |
+          sum(rate(kitchen_tickets_cooked_total{outcome="86d"}[5m]))
+          /
+          clamp_min(sum(rate(kitchen_tickets_cooked_total[5m])), 1e-9)
+
+      # Latency: p95 ticket time (fired -> served), all dishes
+      - record: kitchen:ticket_time_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(kitchen_ticket_time_seconds_bucket[5m])))
+
+      # Latency: p95 ticket time per dish
+      - record: dish:kitchen_ticket_time_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, dish) (rate(kitchen_ticket_time_seconds_bucket[5m])))
+
+      # Latency: p95 HTTP response time per route
+      - record: route:expo_http_request_duration_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, route) (rate(expo_http_request_duration_seconds_bucket[5m])))
+
+      # Errors: HTTP 5xx ratio
+      - record: expo:http_5xx:ratio_rate5m
+        expr: |
+          sum(rate(expo_http_requests_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(expo_http_requests_total[5m])), 1e-9)

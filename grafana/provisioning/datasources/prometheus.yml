@@ -1,0 +1,12 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus          # fixed uid so dashboard JSON can reference it reliably
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false          # change it in this file, not the UI
+    jsonData:
+      timeInterval: 15s      # matches the scrape interval
