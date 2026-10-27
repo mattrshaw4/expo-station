@@ -1,0 +1,7 @@
+# Ranges for the first build. Once it runs, lock exact versions with:
+#   docker compose run --rm order-api pip freeze > kitchen/requirements.lock
+fastapi>=0.115,<1
+uvicorn>=0.32,<1
+psycopg[binary,pool]>=3.2,<4
+redis>=5.2,<8
+prometheus-client>=0.21,<1
