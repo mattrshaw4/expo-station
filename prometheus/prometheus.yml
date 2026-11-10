@@ -5,6 +5,12 @@ global:
   external_labels:
     stack: expo-station
 
+# Phase 4: where firing alerts are sent.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 rule_files:
   - /etc/prometheus/rules/*.yml
 
@@ -35,6 +41,10 @@ scrape_configs:
   - job_name: alloy
     static_configs:
       - targets: ["alloy:12345"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
 
   # Container CPU / memory / network for every container (Docker API, cAdvisor-compatible names)
   - job_name: docker-stats

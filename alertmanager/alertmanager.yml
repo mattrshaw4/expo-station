@@ -1,0 +1,27 @@
+# Alertmanager: decides who hears about an alert, how often, and what to stay quiet about.
+# Prometheus only says "this is true right now"; Alertmanager groups, deduplicates,
+# silences and routes. Here every alert goes to the ticket printer at the pass.
+route:
+  receiver: ticket-printer
+  group_by: [alertname, job]   # one notification per alert per service
+  group_wait: 10s              # wait briefly so alerts that fire together arrive together
+  group_interval: 1m           # how soon to send updates for a group that's already open
+  repeat_interval: 1h          # re-send a still-firing alert at most hourly
+
+receivers:
+  - name: ticket-printer
+    webhook_configs:
+      - url: http://printer:9095/alert
+        send_resolved: true    # also print "all clear" tickets
+
+  # To get real notifications, add a receiver here and point the route at it, e.g.:
+  # - name: discord
+  #   discord_configs:
+  #     - webhook_url_file: /etc/alertmanager/secrets/discord_webhook   # keep URLs out of git
+
+# Inhibition: don't pile on. If the line worker is down, of course the rail backs up;
+# the "rail backing up" alert is a symptom, so it stays quiet while the cause is firing.
+inhibit_rules:
+  - source_matchers: [alertname = "KitchenServiceDown", job = "line-worker"]
+    target_matchers: [alertname = "RailBackingUp"]
+    equal: [stack]

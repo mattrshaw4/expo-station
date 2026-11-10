@@ -3,6 +3,9 @@
 A Docker observability project. A small "kitchen" app takes orders and cooks them; a monitoring
 stack (Prometheus, Grafana, Loki, Alloy, Alertmanager) watches it the way an expo cook watches the pass.
 
+Eleven containers, one `docker compose up`. Metrics, logs and alerts are all config in this repo:
+nothing is clicked together in a UI.
+
 ## Phase 1: the kitchen
 
 | Service | Role | Kitchen term |
@@ -142,6 +145,87 @@ sum by (dish) (count_over_time({service="line-worker"} |= "86'd" [5m]))   # 86s 
 - **Turn off what you don't use.** Grafana downloads several app plugins at every boot.
   `GF_PLUGINS_PREINSTALL_DISABLED=true` stops it; empty `provisioning/plugins` and
   `provisioning/alerting` folders stop the "can't read provisioning directory" errors.
+
+## Phase 4: calling it out (alerts)
+
+| Service | Role | URL |
+|---|---|---|
+| `alertmanager` | Groups, deduplicates, inhibits and routes alerts from Prometheus | http://localhost:9093 |
+| `printer` | Webhook receiver: prints every alert and "all clear" as a JSON log line, so alerts land in Loki | internal :9095 |
+
+```bash
+docker compose up -d --build
+```
+
+The dashboard opens with a new top row, **On the pass: alerts**: how many alerts are firing,
+a pending/firing history per alert, and the ticket printer feed (what Alertmanager actually sent).
+
+![Phase 4 dashboard](docs/phase4-dashboard.png)
+
+### The alerts
+
+| Alert | Fires when | `for` | Severity |
+|---|---|---|---|
+| `High86Rate` | Over 10% of tickets 86'd, **and** more than 2 tickets/min finishing | 2m | warning |
+| `RailBackingUp` | Over 20 tickets on the rail, **and** not shrinking | 5m | warning |
+| `KitchenServiceDown` | Prometheus can't scrape `order-api` or `line-worker` | 1m | critical |
+| `LogPipelineDown` | Prometheus can't scrape Loki or Alloy | 1m | critical |
+
+**Inhibition:** while `KitchenServiceDown` is firing for `line-worker`, `RailBackingUp` is held
+back. A stopped line always backs up the rail; you want to hear about the cause, not the symptom.
+
+### Make them fire
+
+```bash
+# High86Rate: a bad line at normal traffic (fires after ~2-3 minutes)
+FAIL_RATE=0.4 docker compose up -d line-worker
+./scripts/fire-orders.sh 120 3.2
+
+# KitchenServiceDown (and RailBackingUp, inhibited): stop the line, keep ordering
+docker compose stop line-worker && ./scripts/fire-orders.sh 40 0.2
+
+# LogPipelineDown
+docker compose stop loki
+
+# Put everything back
+docker compose up -d
+```
+
+Watch it in Prometheus (http://localhost:9090/alerts), Alertmanager (http://localhost:9093,
+inhibited alerts show under "Inhibited"), and the dashboard's top row.
+
+### Alert rules have unit tests
+
+`prometheus/tests/alerts.test.yml` feeds made-up metric history through the real rules and checks
+which alerts fire, including the cases that *shouldn't* fire:
+
+```bash
+docker compose run --rm --no-deps --entrypoint promtool prometheus test rules /etc/prometheus/tests/alerts.test.yml
+```
+
+### Lessons from building it
+
+- **Ratios lie at low volume.** One failed ticket out of one is a "100% error rate". `High86Rate`
+  has a traffic floor (more than 2 tickets a minute), and a unit test proves it stays quiet at
+  3am volume. Removing the floor makes that test fail, so the test is really guarding something.
+- **Alerts can fire after the fix.** With a stopped `line-worker`, inhibition held back
+  `RailBackingUp`. But when the worker came back, the inhibition lifted while the rail was
+  still deep, so it paged a full minute *after* the problem was solved, while the rail was
+  visibly draining. "Backing up" should mean deep **and not shrinking**, so the rule now
+  includes `deriv(kitchen_rail_depth[2m]) >= 0`. Re-running the same outage: no page. A unit
+  test covers the draining case.
+- **Page on causes, not symptoms.** Inhibition rules encode "if A is true, B is expected".
+  In the test outage, Prometheus fired `RailBackingUp` and Alertmanager held it back; the history
+  panel shows it red while the printer feed never mentions it.
+- **"All clear" messages keep stale numbers.** Alertmanager resends the annotations from when the
+  alert fired, so a resolved ticket read *"ALL CLEAR … 86'ing 30.77% of tickets"*. The printer
+  labels it `"was"` instead of `"summary"` on resolve.
+- **Alerts survive a log outage.** The `LogPipelineDown` ticket was printed while Loki was down.
+  Alloy held it and retried, and it reached Loki once Loki came back.
+- **The pipeline monitors itself.** `LogPipelineDown` is the healthcheck Loki can't have (distroless
+  image, no shell). Prometheus watching Loki closes the loop from Phase 3.
+- **Get real notifications by changing one file.** The printer is a stand-in. Add a Discord, Slack
+  or email receiver in `alertmanager/alertmanager.yml` and point the route at it; nothing else changes.
 
 ## Metrics exposed
 

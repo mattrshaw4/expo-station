@@ -1,0 +1,102 @@
+# Unit tests for the alerting rules. Run with:
+#   docker compose run --rm --entrypoint promtool prometheus test rules /etc/prometheus/tests/alerts.test.yml
+# Each test feeds made-up metric history through the real rules and checks which alerts fire.
+rule_files:
+  - ../rules/kitchen.rules.yml
+  - ../rules/alerts.rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  # A busy service with 20% of tickets 86'd: should fire after the 2m "for".
+  - name: High86Rate fires under real traffic
+    interval: 1m
+    input_series:
+      - series: 'kitchen_tickets_cooked_total{dish="steak", outcome="served"}'
+        values: "0+48x20"      # 48 served per minute
+      - series: 'kitchen_tickets_cooked_total{dish="steak", outcome="86d"}'
+        values: "0+12x20"      # 12 86'd per minute = 20%
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: High86Rate
+        exp_alerts: []         # still pending: hasn't held for 2m yet
+      - eval_time: 10m
+        alertname: High86Rate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The line is 86'ing 20% of tickets"
+              description: 'More than 10% of finished tickets failed over the last 5 minutes. Check line-worker logs: {service="line-worker", level="warning"}'
+
+  # The 3am case: every ticket fails, but only one ticket a minute. The traffic floor keeps it quiet.
+  - name: High86Rate stays quiet at low volume
+    interval: 1m
+    input_series:
+      - series: 'kitchen_tickets_cooked_total{dish="fries", outcome="served"}'
+        values: "0+0x20"
+      - series: 'kitchen_tickets_cooked_total{dish="fries", outcome="86d"}'
+        values: "0+1x20"       # 100% failure rate, 1 ticket/minute
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: High86Rate
+        exp_alerts: []
+
+  # A short blip on the rail shouldn't fire; a sustained backlog should.
+  - name: RailBackingUp needs 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'kitchen_rail_depth'
+        values: "5 30 30 5 5 30 30 30 30 30 30 30"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RailBackingUp
+        exp_alerts: []         # two minutes over 20, then it drained
+      - eval_time: 11m
+        alertname: RailBackingUp
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "30 tickets waiting on the rail"
+              description: "The rail has held more than 20 tickets for 5 minutes. The line can't keep up with front of house."
+
+  # Recovery: the rail is still deep, but draining. That's the fix working, not a new problem.
+  - name: RailBackingUp stays quiet while the rail drains
+    interval: 1m
+    input_series:
+      - series: 'kitchen_rail_depth'
+        values: "40 38 35 32 29 26 23 21 21 20 15"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: RailBackingUp
+        exp_alerts: []         # over 20 the whole time, but falling
+
+  - name: KitchenServiceDown and LogPipelineDown
+    interval: 30s
+    input_series:
+      - series: 'up{job="line-worker", instance="line-worker:9100"}'
+        values: "1 1 0 0 0 0 0 0"
+      - series: 'up{job="loki", instance="loki:3100"}'
+        values: "1 1 1 1 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m30s
+        alertname: KitchenServiceDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: line-worker
+              instance: line-worker:9100
+            exp_annotations:
+              summary: "line-worker is down"
+              description: "Prometheus hasn't been able to scrape line-worker for a minute."
+      - eval_time: 3m30s
+        alertname: LogPipelineDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: loki
+              instance: loki:3100
+            exp_annotations:
+              summary: "loki is down; logs are not being collected"
+              description: "Loki has no healthcheck (distroless image), so this alert is its health check."

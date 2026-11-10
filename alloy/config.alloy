@@ -50,9 +50,9 @@ loki.source.docker "containers" {
 //    picked by the service label. All of them end up writing the same "level" field.
 loki.process "kitchen" {
 
-  // --- Kitchen (order-api, line-worker): one JSON object per line ---
+  // --- Kitchen (order-api, line-worker) and the alert printer: one JSON object per line ---
   stage.match {
-    selector = "{service=~\"order-api|line-worker\"}"
+    selector = "{service=~\"order-api|line-worker|printer\"}"
 
     // Healthchecks and Prometheus scrapes are not customers. Docker probes /health every 10s
     // and Prometheus scrapes /metrics every 15s; at ~10 lines a minute they bury real traffic.
@@ -76,9 +76,9 @@ loki.process "kitchen" {
     }
   }
 
-  // --- The Grafana stack and Prometheus: logfmt (level=info msg="...") ---
+  // --- The Grafana stack, Prometheus and Alertmanager: logfmt (level=info msg="...") ---
   stage.match {
-    selector = "{service=~\"grafana|loki|alloy|prometheus\"}"
+    selector = "{service=~\"grafana|loki|alloy|prometheus|alertmanager\"}"
     stage.logfmt {
       mapping = { level = "" }
     }

@@ -1,7 +1,7 @@
 {
   "uid": "expo-station",
   "title": "Expo Station",
-  "description": "Golden signals for the kitchen app, container resources, and logs.",
+  "description": "Alerts, golden signals for the kitchen app, container resources, and logs.",
   "tags": [
     "expo-station",
     "kitchen"
@@ -15,8 +15,213 @@
     "to": "now"
   },
   "schemaVersion": 41,
-  "version": 2,
+  "version": 3,
   "panels": [
+    {
+      "type": "row",
+      "title": "On the pass: alerts",
+      "id": 24,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Alerts firing",
+      "id": 25,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Alerts Prometheus is sending to Alertmanager right now (includes any Alertmanager is holding back as inhibited).",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "All quiet",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "Alert history",
+      "id": 26,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Pending = condition true but hasn't lasted the rule's 'for:' window yet. Firing = sent to Alertmanager.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (alertname) (ALERTS{alertstate=\"firing\"}) * 2 or max by (alertname) (ALERTS{alertstate=\"pending\"})",
+          "legendFormat": "{{alertname}}",
+          "interval": "15s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No alerts in this window",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Pending"
+                },
+                "2": {
+                  "text": "Firing"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Ticket printer",
+      "id": 27,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Every notification Alertmanager actually sent, after grouping and inhibition. Suppressed alerts never print.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "range",
+          "expr": "{service=\"printer\"} |~ \"ALERT|ALL CLEAR\" | json | line_format \"{{.msg}}  {{.alertname}}{{if .job}} ({{.job}}){{end}}\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false,
+        "showLabels": false,
+        "showCommonLabels": false
+      }
+    },
     {
       "type": "row",
       "title": "The pass: golden signals",
@@ -26,7 +231,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 9
       },
       "panels": []
     },
@@ -43,7 +248,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 1
+        "y": 10
       },
       "targets": [
         {
@@ -103,7 +308,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 1
+        "y": 10
       },
       "targets": [
         {
@@ -171,7 +376,7 @@
         "h": 5,
         "w": 6,
         "x": 12,
-        "y": 1
+        "y": 10
       },
       "targets": [
         {
@@ -239,7 +444,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 1
+        "y": 10
       },
       "targets": [
         {
@@ -303,7 +508,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 15
       },
       "panels": []
     },
@@ -320,7 +525,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 16
       },
       "targets": [
         {
@@ -374,7 +579,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 16
       },
       "targets": [
         {
@@ -437,7 +642,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 24
       },
       "targets": [
         {
@@ -491,7 +696,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 24
       },
       "targets": [
         {
@@ -541,7 +746,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 32
       },
       "panels": []
     },
@@ -558,7 +763,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -612,7 +817,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -662,7 +867,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 41
       },
       "panels": []
     },
@@ -679,7 +884,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -733,7 +938,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -787,7 +992,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -846,7 +1051,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 50
       },
       "panels": []
     },
@@ -863,7 +1068,7 @@
         "h": 8,
         "w": 10,
         "x": 0,
-        "y": 42
+        "y": 51
       },
       "targets": [
         {
@@ -968,7 +1173,7 @@
         "h": 8,
         "w": 10,
         "x": 10,
-        "y": 42
+        "y": 51
       },
       "targets": [
         {
@@ -1024,7 +1229,7 @@
         "h": 8,
         "w": 4,
         "x": 20,
-        "y": 42
+        "y": 51
       },
       "targets": [
         {
@@ -1103,7 +1308,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 59
       },
       "targets": [
         {
@@ -1140,7 +1345,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 59
       },
       "targets": [
         {

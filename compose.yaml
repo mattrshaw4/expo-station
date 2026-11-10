@@ -214,6 +214,44 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # =====================================================================
+  # Phase 4: calling it out (alerts)
+  # =====================================================================
+
+  # ---------- Alertmanager: groups, silences and routes alerts from Prometheus ----------
+  alertmanager:
+    image: prom/alertmanager:v0.35.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager     # keeps silences across restarts
+    ports:
+      - "127.0.0.1:9093:9093"               # Alertmanager UI: firing alerts, silences
+    depends_on:
+      printer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------- printer: the ticket printer at the pass (Alertmanager webhook receiver) ----------
+  # Prints every alert and "all clear" as a JSON log line, so alerts land in Loki too.
+  # Swap it for Discord, Slack or email in alertmanager.yml when you want real notifications.
+  printer:
+    build: ./alertmanager/printer
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9095/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
 secrets:
   db_password:
     file: ./secrets/db_password.txt
@@ -226,3 +264,4 @@ volumes:
   grafana-data:
   loki-data:
   alloy-data:
+  alertmanager-data:

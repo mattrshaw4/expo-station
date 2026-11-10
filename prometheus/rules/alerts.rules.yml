@@ -1,0 +1,58 @@
+# Alerting rules: when the expo calls out a problem.
+# Each alert answers one question a cook at the pass would ask, and reuses the
+# recording rules in kitchen.rules.yml so the dashboard and the alerts agree on the numbers.
+#
+# `for:` is how long the condition must hold before the alert fires. Until then it's "pending".
+# It stops one bad ticket (or one slow scrape) from paging anyone.
+groups:
+  - name: kitchen-alerts
+    rules:
+      # ---- Errors: the line is 86'ing too many tickets ----
+      - alert: High86Rate
+        expr: |
+          kitchen:tickets_86d:ratio_rate5m > 0.10
+          and
+          sum(rate(kitchen_tickets_cooked_total[5m])) * 60 > 2
+        # The second line is a traffic floor. Without it, 1 failure out of 2 tickets at
+        # 3am reads as "50% error rate" and fires. Ratios lie at low volume.
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The line is 86'ing {{ $value | humanizePercentage }} of tickets"
+          description: "More than 10% of finished tickets failed over the last 5 minutes. Check line-worker logs: {service=\"line-worker\", level=\"warning\"}"
+
+      # ---- Saturation: tickets are piling up on the rail ----
+      - alert: RailBackingUp
+        expr: |
+          kitchen_rail_depth > 20
+          and
+          deriv(kitchen_rail_depth[2m]) >= 0
+        # The deriv() line means "and not shrinking". Without it, when a stopped line-worker
+        # came back, this alert fired *after* the fix, while the rail was already draining.
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} tickets waiting on the rail"
+          description: "The rail has held more than 20 tickets for 5 minutes. The line can't keep up with front of house."
+
+      # ---- Availability: a kitchen service stopped answering ----
+      - alert: KitchenServiceDown
+        expr: up{job=~"order-api|line-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus hasn't been able to scrape {{ $labels.job }} for a minute."
+
+      # ---- Watching the watchers: logs stop flowing ----
+      - alert: LogPipelineDown
+        expr: up{job=~"loki|alloy"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down; logs are not being collected"
+          description: "Loki has no healthcheck (distroless image), so this alert is its health check."
