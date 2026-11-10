@@ -1,0 +1,11 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    uid: loki                # fixed uid so dashboard JSON can reference it reliably
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false          # change it in this file, not the UI
+    jsonData:
+      maxLines: 1000

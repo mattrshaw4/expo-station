@@ -1,0 +1,43 @@
+# Loki: the ticket book for logs. Single-binary mode, everything on the local filesystem.
+# Fine for one laptop; in production you'd split the components and use object storage (S3).
+auth_enabled: false            # single tenant, local lab only
+
+server:
+  http_listen_port: 3100
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h            # tsdb requires a 24h index period
+
+limits_config:
+  retention_period: 168h       # 7 days, same as Prometheus
+  allow_structured_metadata: true   # order_id lives here, not in labels (see Alloy config)
+  volume_enabled: true         # powers the log-volume histogram in Grafana Explore
+  discover_service_name: []    # Alloy already sets service=; don't add a duplicate service_name label
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true      # without this, retention_period is ignored and logs live forever
+  delete_request_store: filesystem
+
+analytics:
+  reporting_enabled: false

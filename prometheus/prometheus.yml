@@ -28,6 +28,14 @@ scrape_configs:
         labels:
           station: line
 
+  # Watching the watchers (Phase 3). Loki has no healthcheck, so up{job="loki"} is its health.
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]
+
   # Container CPU / memory / network for every container (Docker API, cAdvisor-compatible names)
   - job_name: docker-stats
     scrape_interval: 15s

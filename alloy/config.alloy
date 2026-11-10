@@ -1,0 +1,155 @@
+// Alloy: the runner between the line and the ticket book.
+// Finds this project's containers through the Docker API, reads their stdout/stderr,
+// pulls fields out of the kitchen's JSON logs, and ships everything to Loki.
+//
+// Why the Docker API and not /var/lib/docker/containers/*.log? Same reason as docker-stats:
+// on Docker Desktop that directory lives inside the WSL2 VM, not somewhere a bind mount
+// from Windows can reach. docker.sock works the same on Desktop and on native Linux.
+
+// 1. Find containers.
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "10s"
+
+  // Only this Compose project. Other containers on the laptop stay out of Loki.
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=expo-station"]
+  }
+}
+
+// 2. Turn Docker metadata into a small, fixed set of labels.
+//    Labels are indexed; keep them low-cardinality (a few values each, never IDs).
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"          // stdout or stderr
+  }
+}
+
+// 3. Tail the logs.
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.docker.containers.targets
+  relabel_rules    = discovery.relabel.containers.rules
+  refresh_interval = "10s"
+  forward_to       = [loki.process.kitchen.receiver]
+}
+
+// 4. Parse. Every service logs in a different format, so each gets its own parser,
+//    picked by the service label. All of them end up writing the same "level" field.
+loki.process "kitchen" {
+
+  // --- Kitchen (order-api, line-worker): one JSON object per line ---
+  stage.match {
+    selector = "{service=~\"order-api|line-worker\"}"
+
+    // Healthchecks and Prometheus scrapes are not customers. Docker probes /health every 10s
+    // and Prometheus scrapes /metrics every 15s; at ~10 lines a minute they bury real traffic.
+    stage.drop {
+      expression          = "\"GET /(health|metrics) HTTP"
+      drop_counter_reason = "probe_noise"
+    }
+
+    stage.json {
+      expressions = { level = "level", ts = "ts", order_id = "order_id", dish = "dish" }
+    }
+    // uvicorn's own access lines are text: 'INFO:     172.18.0.1 - "POST /orders HTTP/1.1" 201'
+    stage.regex {
+      expression = "^(?P<level>[A-Z]+):\\s"
+    }
+    // Use the app's own timestamp, not the moment Alloy read the line.
+    stage.timestamp {
+      source            = "ts"
+      format            = "RFC3339Nano"
+      action_on_failure = "skip"
+    }
+  }
+
+  // --- The Grafana stack and Prometheus: logfmt (level=info msg="...") ---
+  stage.match {
+    selector = "{service=~\"grafana|loki|alloy|prometheus\"}"
+    stage.logfmt {
+      mapping = { level = "" }
+    }
+  }
+
+  // --- Postgres: '2026-11-06 14:31:45.705 UTC [1] LOG:  database system is ready' ---
+  stage.match {
+    selector = "{service=\"db\"}"
+    stage.regex {
+      expression = "\\] (?P<level>LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC):"
+    }
+  }
+
+  // --- Redis: the level is a symbol. '.' debug, '-' verbose, '*' notice, '#' warning ---
+  stage.match {
+    selector = "{service=\"rail\"}"
+    stage.regex {
+      expression = "^\\d+:[A-Z] .{24} (?P<redis_sym>[.*#-]) "
+    }
+    stage.template {
+      source   = "level"
+      template = "{{ if eq (print .redis_sym) \"#\" }}warning{{ else }}info{{ end }}"
+    }
+  }
+
+  // --- docker-stats: Python's default format '2026-11-06 14:31:45,744 INFO listening...' ---
+  stage.match {
+    selector = "{service=\"docker-stats\"}"
+    stage.regex {
+      expression = "^\\S+ \\S+ (?P<level>[A-Z]+) "
+    }
+  }
+
+  // --- Normalise: every service now speaks the same five levels ---
+  stage.template {
+    source   = "level"
+    template = "{{ if .level }}{{ ToLower .level }}{{ else }}info{{ end }}"
+  }
+  stage.replace {
+    source     = "level"
+    expression = "^(warn)$"
+    replace    = "warning"
+  }
+  stage.replace {
+    source     = "level"
+    expression = "^(log|notice)$"
+    replace    = "info"
+  }
+  stage.replace {
+    source     = "level"
+    expression = "^(fatal|panic|critical)$"
+    replace    = "error"
+  }
+
+  // level and dish are safe labels (a handful of values each).
+  stage.labels {
+    values = { level = "", dish = "" }
+  }
+
+  // order_id is high-cardinality: one value per ticket. As a label it would explode Loki's
+  // index. Structured metadata keeps it searchable without indexing it.
+  stage.structured_metadata {
+    values = { order_id = "" }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+// 5. Ship.
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
